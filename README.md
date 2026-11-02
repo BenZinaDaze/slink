@@ -1,157 +1,106 @@
 # slink · 简单高效的短链接系统
 
-单用户个人版短链接平台。
+自部署的个人短链接服务：短链管理、分组、访问统计、二维码、监控看板——一个 Docker 命令跑起来，数据全在自己手里。
 
-**后端 Golang 单体单二进制 · 前端 React + TailwindCSS + shadcn/ui · SQLite（零 SQL 服务）· Redis**
+**不需要单独安装数据库**：内置 SQLite，整个服务只依赖一个 Redis。
 
-```
-浏览器 ──► slink (Go/Gin 单二进制 :8080)
-            ├── GET /{code}     302 跳转（热路径）
-            ├── /api/v1/*       管理 API（token 鉴权）
-            └── /*              内嵌 React SPA
-           ├── SQLite (data/slink.db, WAL)   业务数据 + 统计聚合
-           └── Redis                           跳转缓存 / 布隆过滤器 / token / UV 去重 / Stream 统计管道
-```
+## 功能一览
 
-## 功能清单
-
-| 模块 | 功能 |
+| 模块 | 能做什么 |
 |---|---|
-| 认证 | 单用户登录（config 配置账号）、修改密码（bcrypt）、登出踢下线、登录限速 |
-| 分组 | 增删改查、排序、每组短链计数（默认分组不可删） |
-| 短链接 | 创建（自定义后缀 / 雪花+Base62 自动短码）、编辑、分页搜索、标题自动抓取、启用/停用、永久/自定义有效期 |
-| 回收站 | 软删除 → 回收站 → 恢复（同码冲突检测）→ 可重建同码 |
-| 跳转 | 302 重定向；布隆过滤器 → 缓存 → 空值缓存 → singleflight 回源；404/410(过期)/403(停用) 页面 |
-| 监控 | PV/UV/UIP 汇总、按天趋势、小时/星期分布、地域(ip2region)/浏览器/OS/设备分布、访问明细分页 |
-| 仪表盘 | 短链总数、今日 PV/UV、累计点击、近 30 天趋势、Top10 短链 |
-| 管理台 | shadcn 管理面板（可折叠侧边栏、⌘K 命令面板、深色模式、二维码、中文界面） |
-
-## 技术要点
-
-- **跳转热路径**：布隆过滤器（Redis bitmap，0.1% 误判）拦截不存在的短码 → 缓存命中直出（TTL 跟随有效期）→ 空值缓存防穿透 → singleflight 合并并发回源；创建即缓存预热
-- **短码生成**：秒级雪花 ID（时间戳+节点+序列，46 位）经 Base62 编码为 7-8 位短码，趋势递增、单节点无冲突
-- **统计管道**：跳转事件非阻塞写入 Redis Stream → 消费者组批量拉取 → UA 解析 + ip2region 地域 + Redis SET 去重（UV/UIP）→ 聚合 upsert 落库 → Ack；重启自动重投 pending 消息
-- **回收站语义**：`UNIQUE(short_uri, deleted_at)`（删除时间戳参与唯一键），软删后可重建同码、恢复时冲突检测
-- **单二进制**：go:embed 内嵌前端产物与建表脚本，33MB 二进制 + Redis 即完整服务
-
-### 认证机制
-
-采用**不透明随机 token + 服务端会话态**（UUID 存 Redis，30 天 TTL），而非 JWT：可随时吊销（登出/改密即失效）、无需管理签名密钥；代价是每次校验多一次 Redis 读，单机部署可忽略。配套安全设计：
-
-- 密码 bcrypt 哈希存储；登录失败限速 10 次/分/IP
-- 登录失败统一返回"用户名或密码错误"（防账号枚举），且两种失败路径均执行 bcrypt 比较（防时序探测）
-- token 携带凭证版本号，修改用户名/密码后版本自增 → **全部旧会话立即下线**，当前会话凭返回的新 token 无缝续期
-- 生产部署请置于 HTTPS 反向代理之后（`shortlink.domain` 同步配置）
+| 短链接 | 自定义后缀或自动生成短码、设置有效期、启用/停用、批量搜索 |
+| 分组 | 按用途归组（如"推广"、"文档"），一键筛选 |
+| 回收站 | 删除的短链可恢复，也允许用相同短码重建新链接 |
+| 访问统计 | 每条短链的 PV / UV / 独立 IP、访问趋势、时段分布、访客地域/浏览器/系统/设备、访问明细 |
+| 仪表盘 | 短链总数、今日访问、累计点击、近 30 天趋势、热门 Top 10 |
+| 体验 | 中文界面、深色模式、⌘K 快速搜索、短链二维码一键复制 |
 
 ## 快速开始
 
-### 依赖
-
-- Go 1.27+、Node 22+（构建）；运行期仅需 Redis
-
-### 本地开发
+### 方式一：Docker Compose（推荐）
 
 ```bash
-# 终端1：后端（读取 backend/config.yaml）
-make dev-be
+git clone https://github.com/BenZinaDaze/slink.git
+cd slink
 
-# 终端2：前端（vite :5173，/api 代理到 :8080）
-make dev-fe
-```
-
-打开 http://localhost:5173 ，默认账号 `admin / admin123`（见 `backend/config.yaml`）。
-
-### 单二进制部署
-
-```bash
-make ipdb    # 可选：下载 ip2region 离线库（地域统计，缺失自动降级）
-make build   # 前端构建 → go:embed → backend/slink 单二进制
-cd backend && ./slink -c config.yaml
-```
-
-SQLite 数据文件在 `backend/data/slink.db`。
-
-### Docker Compose
-
-```bash
-cp .env.example .env   # 按需修改 Redis 密码与初始账号（不复制则用默认值）
+cp .env.example .env    # 打开改一下 Redis 密码和初始账号
 docker compose up -d --build
 ```
 
-- **Redis 已启用密码**（`--requirepass`，默认 `slink123`，`.env` 中 `REDIS_PASSWORD` 覆盖），slink 通过环境变量自动接入
-- slink 等 Redis 健康检查通过后才启动；初始账号同样可用 `.env` 的 `SLINK_USERNAME` / `SLINK_PASSWORD` 覆盖
-- 数据持久化：SQLite 与 ip2region 库在 `slink-data` 卷，Redis 数据在 `redis-data` 卷
+打开 http://localhost:8080 ，用 `.env` 里设置的账号登录即可。
 
-## 配置（`backend/config.yaml`，环境变量 `SLINK_*` 覆盖）
-
-| 配置 | 说明 |
-|---|---|
-| `server.port / mode` | 端口 / debug·release |
-| `auth.username / password / token_ttl` | 登录账号；密码为初始值，改密后存 SQLite |
-| `database.path` | SQLite 文件路径（ip2region.xdb 放同目录生效） |
-| `redis.addr` | Redis 地址 |
-| `shortlink.domain / whitelist` | 短链域名（默认请求 Host）/ 目标域名白名单（空不限制） |
-| `stats.*` | Stream / 消费者组 / 批量参数 |
-
-## API 概览（统一响应 `{code, message, data, success, requestId}`）
-
-```
-POST   /api/v1/auth/login            登录（限速 10 次/分/IP）
-GET    /api/v1/auth/me               当前账号信息
-DELETE /api/v1/auth/logout           登出
-PUT    /api/v1/auth/account          修改用户名/密码（需原密码，吊销全部旧会话并返回新 token）
-
-GET    /api/v1/groups               分组列表（含计数）
-POST   /api/v1/groups               新增分组
-PUT    /api/v1/groups/{gid}         修改分组
-PUT    /api/v1/groups/sort          分组排序
-DELETE /api/v1/groups/{gid}         删除分组（组内有链禁止）
-
-GET    /api/v1/links?page&size&gid&key   分页（gid/关键词/排序）
-POST   /api/v1/links                创建（originUrl/gid/validDate*/customUri/describe/title）
-PUT    /api/v1/links/{id}           修改（含启用/停用）
-GET    /api/v1/links/{id}           详情
-DELETE /api/v1/links/{id}           软删除 → 回收站
-GET    /api/v1/links/title?url=     抓取目标页标题
-
-GET    /api/v1/recycle-bin          回收站分页
-POST   /api/v1/recycle-bin/{id}/restore   恢复
-
-GET    /api/v1/links/{id}/stats?start&end      汇总 + 按天趋势
-GET    /api/v1/links/{id}/stats/hourly|weekday 时段分布
-GET    /api/v1/links/{id}/stats/dim?dim=      维度分布（locale/browser/os/device）
-GET    /api/v1/links/{id}/stats/records       访问明细
-
-GET    /api/v1/dashboard            仪表盘
-GET    /{code}                      302 跳转（404/410/403）
-```
-
-> 保留字：`login/links/recycle-bin/settings/assets/api/dashboard/link-error` 不作为短码解析（SPA 路由），创建自定义后缀时同样被拦截。
-
-## 目录结构
-
-```
-backend/
-├── cmd/slink/main.go        入口
-├── internal/
-│   ├── app/                 装配与路由、SPA 兜底
-│   ├── config/              viper 配置
-│   ├── handler/             HTTP 层（auth/group/link/stats/redirect）
-│   ├── service/             业务（含跳转热路径、缓存、singleflight）
-│   ├── repo/                GORM/SQLite 数据访问
-│   ├── stats/               Stream 消费者、UA 解析、ip2region
-│   ├── middleware/          鉴权 / requestId / 限速
-│   └── model/ dto/
-├── pkg/                     result / errcode / shortgen / bloom
-├── migrations/schema.sql    建表（启动自动执行）
-├── web/dist/                前端产物（go:embed）
-└── config.yaml
-frontend/                    Vite + React + TS + shadcn/ui
-Makefile · docker-compose.yml · backend/Dockerfile
-```
-
-## 测试
+### 方式二：直接使用已发布的镜像
 
 ```bash
-make test    # 短码生成/Base62、标题提取、UA 解析单测
+docker network create slink
+docker run -d --name slink-redis --network slink \
+  redis:7-alpine redis-server --requirepass 换成你的密码
+
+docker run -d --name slink --network slink -p 8080:8080 \
+  -e SLINK_REDIS_ADDR=slink-redis:6379 \
+  -e SLINK_REDIS_PASSWORD=换成你的密码 \
+  -e SLINK_AUTH_USERNAME=admin \
+  -e SLINK_AUTH_PASSWORD=换成初始密码 \
+  -v slink-data:/app/data \
+  benz1/slink:latest
 ```
+
+### 首次登录后建议做的事
+
+1. 进入「设置」页**修改初始密码**（页面上会一直提醒你）
+2. 创建第一条短链接：短链接页 → 新建短链接，粘贴长链接即可；标题可自动抓取
+3. 点短码旁的二维码图标可展示/复制二维码
+
+## 配置
+
+容器部署用 `.env`（或环境变量），二进制直跑改 `backend/config.yaml`。所有配置均可通过 `SLINK_` 前缀的环境变量覆盖。
+
+| 配置 | 环境变量 | 默认值 | 说明 |
+|---|---|---|---|
+| Redis 密码 | `REDIS_PASSWORD` | `slink123` | compose 中 slink 与 Redis 共用 |
+| 初始账号 | `SLINK_USERNAME` | `admin` | 仅首次启动生效，之后以「设置」页修改的为准 |
+| 初始密码 | `SLINK_PASSWORD` | `admin123` | 同上 |
+| 服务端口 | compose 里 `8080:8080` 左侧 | 8080 | 对外访问端口 |
+| 短链域名 | `SLINK_SHORTLINK_DOMAIN` | 请求 Host | 有独立域名/HTTPS 时填写，如 `https://s.example.com` |
+| 目标域名白名单 | config `shortlink.whitelist` | 不限制 | 限制只能给指定域名生成短链（如防滥用） |
+
+> 保留字：`login` `links` `recycle-bin` `settings` `assets` 等前端路由不能用作自定义短码，创建时会被拦截。
+
+## 数据与备份
+
+- 全部业务数据在**一个 SQLite 文件**里，日志等无需关心
+  - Docker：名为 `slink-data` 的卷（容器内 `/app/data/slink.db`）
+  - 源码直跑：`backend/data/slink.db`
+- **备份**：定期复制该文件即可（建议停机或低峰期复制）
+- **重置全部数据**：停止服务 → 删除该文件及同名 `-wal`/`-shm` 文件 → 重启（账号密码恢复为初始值）
+- Redis 中的数据（缓存/登录态/未落库统计）丢失不影响业务数据，最多损失几秒内的统计数据
+
+## 常见问题
+
+**忘记密码怎么办？**
+「设置」页改过的密码无法找回。两种处理：
+- 完全重置：删除数据文件（见上）
+- 保留数据：停止服务后，在数据目录执行
+  `sqlite3 slink.db "DELETE FROM t_settings WHERE k='password_hash';"`
+  然后重启，即可用 config/.env 里的初始密码登录
+
+**如何启用 HTTPS？**
+在前面挂一层反向代理（Nginx / Caddy / Traefik）终结 TLS，并把 `SLINK_SHORTLINK_DOMAIN` 设为 `https://你的域名`。跳转统计依赖每次点击回源，务必使用 HTTPS。
+
+**短链会失效吗？**
+永久短链不会过期；设置了自定义有效期的到点后返回"已过期"页（410），可在回收站外重新编辑续期。删除进回收站的链接返回 404，可随时恢复。
+
+**升级版本**
+```bash
+git pull && docker compose up -d --build
+# 或使用镜像：docker compose pull && docker compose up -d
+```
+数据自动沿用，无需迁移。
+
+## 开发者
+
+架构设计、API 文档、本地开发与测试见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+
+## 许可
+
+个人使用与学习自由部署。
