@@ -136,25 +136,32 @@ export default function LinksPage() {
           </div>
         )}
         <div className="space-y-0.5">
-          <button
-            className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent ${!gid ? "bg-accent font-medium" : ""}`}
-            onClick={() => {
-              setGid("");
-              setPage(1);
-            }}
+          {/* 统一行结构：名称 flex-1 + 固定宽徽标 + 固定宽操作槽，
+              保证所有行（含无删除按钮的"全部/默认分组"）的徽标严格同列 */}
+          <div
+            className={`group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-accent ${!gid ? "bg-accent font-medium" : ""}`}
           >
-            <span>全部</span>
-            <Badge variant="secondary" className="font-mono text-xs">
+            <button
+              className="min-w-0 flex-1 truncate text-left"
+              onClick={() => {
+                setGid("");
+                setPage(1);
+              }}
+            >
+              全部
+            </button>
+            <Badge variant="secondary" className="min-w-6 justify-center font-mono text-xs tabular-nums">
               {groups.reduce((s, g) => s + g.linkCount, 0)}
             </Badge>
-          </button>
+            <span className="w-4 shrink-0" />
+          </div>
           {groups.map((g) => (
             <div
               key={g.gid}
-              className={`group flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent ${gid === g.gid ? "bg-accent font-medium" : ""}`}
+              className={`group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-accent ${gid === g.gid ? "bg-accent font-medium" : ""}`}
             >
               <button
-                className="flex-1 truncate text-left"
+                className="min-w-0 flex-1 truncate text-left"
                 onClick={() => {
                   setGid(g.gid);
                   setPage(1);
@@ -162,10 +169,10 @@ export default function LinksPage() {
               >
                 {g.name}
               </button>
-              <div className="flex items-center gap-1">
-                <Badge variant="secondary" className="font-mono text-xs">
-                  {g.linkCount}
-                </Badge>
+              <Badge variant="secondary" className="min-w-6 justify-center font-mono text-xs tabular-nums">
+                {g.linkCount}
+              </Badge>
+              <span className="flex w-4 shrink-0 justify-center">
                 {g.gid !== "default" && (
                   <button
                     className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
@@ -177,7 +184,7 @@ export default function LinksPage() {
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
-              </div>
+              </span>
             </div>
           ))}
         </div>
