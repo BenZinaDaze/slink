@@ -1,20 +1,21 @@
-# ---- 前端构建 ----
-FROM node:22-alpine AS fe
+# ---- 前端构建（产物平台无关：跑在构建机原生架构，只构建一次，禁用 QEMU）----
+FROM --platform=$BUILDPLATFORM node:22-alpine AS fe
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ---- 后端构建 ----
-FROM golang:1.27-alpine AS be
+# ---- 后端构建（跑在构建机原生架构，GOARCH 交叉编译出目标平台二进制，禁用 QEMU）----
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS be
+ARG TARGETARCH
 ARG APP_VERSION=dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY backend/ ./backend/
 COPY --from=fe /app/dist ./backend/web/dist
-RUN cd backend && CGO_ENABLED=0 go build \
+RUN cd backend && CGO_ENABLED=0 GOARCH=${TARGETARCH} go build \
     -ldflags "-s -w -X github.com/benzi/slink/backend/internal/version.Version=${APP_VERSION}" \
     -o /slink ./cmd/slink
 
