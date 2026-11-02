@@ -8,8 +8,9 @@ backend/data/
 # 前端
 frontend/node_modules/
 frontend/dist/
+# web/dist 为构建产物目录，仅保留 .gitkeep 使 go:embed 可编译
 backend/web/dist/*
-!backend/web/dist/index.html
+!backend/web/dist/.gitkeep
 
 # IDE / 系统
 .DS_Store

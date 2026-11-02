@@ -20,8 +20,9 @@ build: build-fe build-be
 
 build-fe:
 	cd frontend && npm run build
-	rm -rf backend/web/dist
-	cp -r frontend/dist backend/web/dist
+	@# 覆盖式拷贝（保留目录内 .gitkeep，它是唯一入库文件）
+	mkdir -p backend/web/dist
+	cp -R frontend/dist/. backend/web/dist/
 
 build-be:
 	cd backend && go build \
@@ -48,8 +49,5 @@ down:
 clean:
 	rm -f backend/slink
 	rm -rf frontend/dist backend/web/dist
-	@# 恢复 go:embed 占位 index.html（仓库提交占位版；make build 会用真实产物覆盖）
-	@mkdir -p backend/web/dist
-	@git show HEAD:backend/web/dist/index.html > backend/web/dist/index.html 2>/dev/null || \
-		printf '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="utf-8"><title>slink</title></head>\n<body style="font-family:system-ui">slink：前端产物未构建，请执行 make build</body></html>\n' > backend/web/dist/index.html
-	@echo "✓ 已清理并恢复 embed 占位文件"
+	@mkdir -p backend/web/dist && touch backend/web/dist/.gitkeep
+	@echo "✓ 已清理（web/dist 仅保留 .gitkeep 供 go:embed 编译）"

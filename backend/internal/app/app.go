@@ -176,6 +176,15 @@ func spaFallback(cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 		}
+		// 前端产物未嵌入（仓库里 web/dist 只有 .gitkeep）时给出构建提示
+		if _, err := fs.Stat(webFS, "index.html"); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code": "B0003",
+				"message": "前端资源未构建：请在项目根目录执行 make build 生成单二进制，或使用 make dev 进入开发模式",
+				"success": false,
+			})
+			return
+		}
 		c.Header("Cache-Control", "no-cache")
 		http.ServeFileFS(c.Writer, c.Request, webFS, "index.html")
 	}
