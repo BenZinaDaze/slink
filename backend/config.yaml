@@ -1,0 +1,30 @@
+# slink 配置；所有配置均可通过环境变量覆盖，如 SLINK_SERVER_PORT、SLINK_REDIS_ADDR
+server:
+  port: 8080
+  mode: debug # debug | release
+
+auth:
+  username: admin       # 初始用户名；设置页修改后以 t_settings 中的值为准
+  password: admin123   # 初始密码；设置页修改后以 t_settings 中的 bcrypt 哈希为准
+  token_ttl: 720h      # 登录态有效期
+
+database:
+  path: ./data/slink.db # SQLite 文件路径，目录不存在会自动创建
+
+redis:
+  addr: redis.orb.local:6379 # 本机 OrbStack Redis；标准环境写 127.0.0.1:6379
+  password: ""
+  db: 0
+
+shortlink:
+  domain: ""           # 短链域名，留空则使用请求 Host
+  default_cache_ttl: 720h # 永久短链的缓存 TTL（30 天）
+  null_cache_ttl: 30s     # 空值缓存 TTL
+  whitelist: []        # 目标域名白名单，空数组表示不限制
+
+stats:
+  stream: slink:stats:events   # Redis Stream 名称
+  group: slink-stats-group     # 消费者组
+  consumer: consumer-1         # 消费者名称
+  batch_size: 50               # 每次拉取条数
+  block_ms: 1000               # XReadGroup 阻塞毫秒数
