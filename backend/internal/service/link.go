@@ -24,7 +24,9 @@ import (
 	"github.com/benzi/slink/backend/pkg/shortgen"
 )
 
-var customURIRe = regexp.MustCompile(`^[0-9a-zA-Z_-]{4,8}$`)
+// 自定义后缀：2-16 位（短如 "go" 便于记忆，长如 "install-script" 语义明确），
+// 仅字母/数字/-/_（不含 "."，避免与静态资源路径冲突）
+var customURIRe = regexp.MustCompile(`^[0-9a-zA-Z_-]{2,16}$`)
 
 // ReservedPaths 前端路由保留字：与 SPA 路由冲突的短码不允许创建，
 // NoRoute 解析时也优先按 SPA 处理

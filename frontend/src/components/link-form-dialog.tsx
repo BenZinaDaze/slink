@@ -121,7 +121,8 @@ export function LinkFormDialog({ open, onOpenChange, groups, editing }: Props) {
         <DialogHeader>
           <DialogTitle>{editing ? "编辑短链接" : "新建短链接"}</DialogTitle>
           <DialogDescription>
-            填写原始链接与配置；自定义后缀为 4-8 位字母、数字、- 或 _
+            填写原始链接与配置；自定义后缀支持 2-16 位字母、数字、- 或 _（如
+            go、cv、install-script）
           </DialogDescription>
         </DialogHeader>
 
@@ -183,7 +184,7 @@ export function LinkFormDialog({ open, onOpenChange, groups, editing }: Props) {
                 <Label htmlFor="customUri">自定义后缀</Label>
                 <Input
                   id="customUri"
-                  placeholder="留空自动生成"
+                  placeholder="如 go / deploy / install-script，留空自动生成"
                   value={customUri}
                   onChange={(e) => setCustomUri(e.target.value)}
                 />

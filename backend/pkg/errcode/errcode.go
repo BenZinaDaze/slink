@@ -32,7 +32,7 @@ var (
 
 	LinkNotFound      = New("C0101", "短链接不存在")
 	ShortURIExists    = New("C0102", "短链接后缀已存在")
-	ShortURIInvalid   = New("C0103", "自定义后缀仅支持 4-8 位字母、数字、- 或 _")
+	ShortURIInvalid   = New("C0103", "自定义后缀仅支持 2-16 位字母、数字、- 或 _")
 	OriginURLInvalid  = New("C0104", "原始链接格式错误，仅支持 http/https 且长度不超过 1024")
 	URLNotWhitelisted = New("C0105", "目标域名不在白名单内")
 	LinkExpired       = New("C0106", "短链接已过期")
