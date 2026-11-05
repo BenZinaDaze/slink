@@ -10,9 +10,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getShortDomain } from "@/lib/auth";
+
+/** 短链基础地址：优先配置的短链域名（补全 scheme），单域模式回落当前访问域名 */
+function baseOrigin(): string {
+  const domain = getShortDomain();
+  if (!domain) return window.location.origin;
+  const trimmed = domain.replace(/\/+$/, "");
+  return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
 
 export function fullShortUrl(shortUri: string) {
-  return `${window.location.origin}/${shortUri}`;
+  return `${baseOrigin()}/${shortUri}`;
 }
 
 export function copyText(text: string) {

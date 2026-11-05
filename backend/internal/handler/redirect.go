@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/benzi/slink/backend/internal/middleware"
 	"github.com/benzi/slink/backend/internal/service"
 	"github.com/benzi/slink/backend/pkg/errcode"
 )
@@ -46,13 +45,13 @@ func (h *RedirectHandler) Handle(c *gin.Context) {
 	if res.Err != nil {
 		switch res.Err {
 		case errcode.LinkNotFound:
-			errorPage(c, http.StatusNotFound, "短链接不存在", "该短链接不存在或已被删除")
+			ErrorPage(c, http.StatusNotFound, "短链接不存在", "该短链接不存在或已被删除")
 		case errcode.LinkExpired:
-			errorPage(c, http.StatusGone, "短链接已过期", "该短链接的有效期已结束")
+			ErrorPage(c, http.StatusGone, "短链接已过期", "该短链接的有效期已结束")
 		case errcode.LinkDisabled:
-			errorPage(c, http.StatusForbidden, "短链接已停用", "该短链接已被管理员停用")
+			ErrorPage(c, http.StatusForbidden, "短链接已停用", "该短链接已被管理员停用")
 		default:
-			errorPage(c, http.StatusInternalServerError, "服务暂时不可用", "请稍后重试")
+			ErrorPage(c, http.StatusInternalServerError, "服务暂时不可用", "请稍后重试")
 		}
 		c.Abort()
 		return
@@ -60,7 +59,7 @@ func (h *RedirectHandler) Handle(c *gin.Context) {
 	// 非阻塞发布访问事件（Redis Stream），统计链路异步消费
 	h.events.Publish(c.Request.Context(), service.StatsEvent{
 		ShortURI: code,
-		IP:       middleware.ClientIP(c),
+		IP:       c.ClientIP(),
 		UA:       c.Request.UserAgent(),
 		Referer:  c.Request.Referer(),
 		At:       time.Now(),
@@ -69,7 +68,8 @@ func (h *RedirectHandler) Handle(c *gin.Context) {
 	c.Redirect(http.StatusFound, res.OriginURL) // 302，不缓存以便统计
 }
 
-func errorPage(c *gin.Context, status int, title, desc string) {
+// ErrorPage 内联错误页（404/410/403 等），spaFallback 的域分离守卫也复用
+func ErrorPage(c *gin.Context, status int, title, desc string) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(status, errorTmpl, title, status, title, desc)
 }

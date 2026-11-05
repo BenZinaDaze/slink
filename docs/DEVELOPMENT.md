@@ -27,19 +27,24 @@
 
 采用**不透明随机 token + 服务端会话态**（UUID 存 Redis，值格式 `username#凭证版本号`），而非 JWT：可随时吊销、无需管理签名密钥。配套安全设计：
 
-- 密码 bcrypt 哈希存储；登录失败限速 10 次/分/IP
+- 密码 bcrypt 哈希存储；改密最小长度 8 位；初始密码未修改时强制停留在设置页（`auth.allow_default_password` 可豁免）
 - 登录失败统一文案（防账号枚举），且两种失败路径均执行 bcrypt 比较（防时序探测）
-- token 携带凭证版本号，修改用户名/密码后版本自增 → 全部旧会话立即下线，当前会话凭返回的新 token 无缝续期
+- token 携带凭证版本号，修改用户名/密码后版本自增 → 全部旧会话立即下线，当前会话凭写入的新 Cookie 无缝续期
+- **凭证只走 HttpOnly Cookie**（`slink_token`，`SameSite=Strict`，Max-Age 同 token TTL；Secure 自动探测 HTTPS，`auth.cookie_secure` 可覆盖），响应体不返回 token；`Authorization: Bearer` 与裸 `token` 头仅作脚本调用兼容，前端不持有凭证
+- 防爆破三层：每 IP 每分钟 10 次尝试上限 → 连续失败 ≥5 次指数退避锁（30s 起步翻倍，封顶 1h，`service.loginLockDuration`）→ 凭证校验
+- 客户端 IP 一律取 gin `c.ClientIP()`，由 `engine.SetTrustedProxies(cfg.Server.TrustedProxies)` 控制是否采信 `X-Forwarded-For`——**默认空 = 不信任**，伪造代理头无法绕过限速；统计管道的 IP 同源
+- **域分离**（`shortlink.domain` 非空时）：该 Host 下 `/api/*`（`middleware.APIGate`）与 SPA/静态资源（`app.spaFallback` 顶部守卫）一律 404，与不存在路由不可区分，只保留 `/health` 与短码跳转
+- 全局安全响应头（`middleware.SecurityHeaders`）：CSP（script 限自持、style 需 unsafe-inline）、`X-Frame-Options: DENY`、nosniff、Referrer-Policy；HSTS 留给 TLS 终结的反代层
 
 ## API 概览
 
-统一响应 `{code, message, data, success, requestId}`，鉴权头 `Authorization: Bearer <token>`。
+统一响应 `{code, message, data, success, requestId}`。鉴权走 HttpOnly Cookie（脚本调用可用 `Authorization: Bearer <token>`）。
 
 ```
-POST   /api/v1/auth/login            登录（限速 10 次/分/IP）
-GET    /api/v1/auth/me               当前账号信息
-DELETE /api/v1/auth/logout           登出
-PUT    /api/v1/auth/account          修改用户名/密码（需原密码，吊销全部旧会话并返回新 token）
+POST   /api/v1/auth/login            登录（三层防爆破，成功写 HttpOnly Cookie，响应不含 token）
+GET    /api/v1/auth/me               当前账号信息（含 shortDomain / isDefaultPassword / mustChangePassword）
+DELETE /api/v1/auth/logout           登出（清除 Cookie）
+PUT    /api/v1/auth/account          修改用户名/密码（需原密码，吊销全部旧会话，新凭证写入 Cookie）
 
 GET    /api/v1/groups               分组列表（含计数）
 POST   /api/v1/groups               新增分组

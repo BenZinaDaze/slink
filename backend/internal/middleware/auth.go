@@ -13,6 +13,7 @@ import (
 
 const (
 	TokenKey    = "auth:token:"
+	TokenCookie = "slink_token"
 	CtxUsername = "username"
 )
 
@@ -34,10 +35,11 @@ type TokenSaver interface {
 	Verify(ctx context.Context, token string) (username string, ok bool)
 }
 
-// Auth 登录态校验中间件：Authorization: Bearer <token>
+// Auth 登录态校验中间件。token 来源优先级：HttpOnly Cookie → Authorization: Bearer → 裸 token 头
+// （后两者兼容脚本调用与旧版客户端）
 func Auth(s TokenSaver) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := bearerToken(c)
+		token := TokenFromRequest(c)
 		if token == "" {
 			result.Fail(c, errcode.Unauthorized)
 			c.Abort()
@@ -54,24 +56,14 @@ func Auth(s TokenSaver) gin.HandlerFunc {
 	}
 }
 
-func bearerToken(c *gin.Context) string {
+// TokenFromRequest 按优先级提取登录 token
+func TokenFromRequest(c *gin.Context) string {
+	if ck, err := c.Cookie(TokenCookie); err == nil && ck != "" {
+		return ck
+	}
 	h := c.GetHeader("Authorization")
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
 	return c.GetHeader("token") // 兼容裸 token 头
-}
-
-// ClientIP 提取客户端真实 IP（优先代理头）
-func ClientIP(c *gin.Context) string {
-	if ip := c.GetHeader("X-Forwarded-For"); ip != "" {
-		if i := strings.IndexByte(ip, ','); i > 0 {
-			return strings.TrimSpace(ip[:i])
-		}
-		return strings.TrimSpace(ip)
-	}
-	if ip := c.GetHeader("X-Real-IP"); ip != "" {
-		return ip
-	}
-	return c.ClientIP()
 }

@@ -31,7 +31,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const data = await login(username, password);
-      setAuth(data.token, data.username);
+      setAuth(data.username, data.shortDomain);
       toast.success("登录成功");
       navigate("/");
     } catch (err) {

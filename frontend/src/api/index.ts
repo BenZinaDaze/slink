@@ -73,7 +73,7 @@ export interface AccessRecord {
 // ---------- auth ----------
 
 export const login = (username: string, password: string) =>
-  http.post<{ token: string; username: string }>("/api/v1/auth/login", {
+  http.post<{ username: string; shortDomain: string }>("/api/v1/auth/login", {
     username,
     password,
   });
@@ -82,18 +82,23 @@ export const logout = () => http.delete<void>("/api/v1/auth/logout");
 
 export interface MeInfo {
   username: string;
+  shortDomain: string;
   isDefaultPassword: boolean;
+  mustChangePassword: boolean;
 }
 
 export const getMe = () => http.get<MeInfo>("/api/v1/auth/me");
 
-/** 修改用户名和/或密码；成功后其他会话全部下线，返回新 token 续期当前会话 */
+/** 修改用户名和/或密码；成功后其他会话全部下线，新凭证由 HttpOnly Cookie 续期 */
 export const updateAccount = (payload: {
   username?: string;
   oldPassword: string;
   newPassword?: string;
 }) =>
-  http.put<{ token: string; username: string }>("/api/v1/auth/account", payload);
+  http.put<{ username: string; shortDomain: string }>(
+    "/api/v1/auth/account",
+    payload,
+  );
 
 // ---------- groups ----------
 

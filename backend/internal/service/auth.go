@@ -21,7 +21,24 @@ const (
 	settingKeyPassword = "password_hash"
 	settingKeyUsername = "username"
 	keyTokenVersion    = "auth:ver"
+	keyLoginFails      = "rl:login:fail:" // 连续失败计数，值 = 次数
+	keyLoginLock       = "rl:login:lock:" // 指数退避锁，值无关紧要，TTL 即锁时长
 )
+
+// loginLockDuration 连续失败 n 次后的锁定时长：满 5 次起锁，30s 起步每次翻倍，封顶 1h
+func loginLockDuration(fails int) time.Duration {
+	if fails < 5 {
+		return 0
+	}
+	shift := fails - 5
+	if shift > 16 { // 防移位溢出，30s<<16 已远超 1h
+		shift = 16
+	}
+	if d := 30 * time.Second << uint(shift); d > 0 && d <= time.Hour {
+		return d
+	}
+	return time.Hour
+}
 
 // AuthService 单用户认证。
 //
@@ -121,11 +138,16 @@ func splitTokenValue(val string) (string, int, bool) {
 	return val[:i], ver, true
 }
 
-// Me 当前账号信息（是否仍为配置初始密码，供前端提示）
-func (s *AuthService) Me(ctx context.Context) (username string, isDefaultPassword bool) {
+// Me 当前账号信息：isDefault = 是否仍为配置初始密码（供横幅提示），
+// mustChange = 是否强制要求修改（未被 auth.allow_default_password 豁免）
+func (s *AuthService) Me(ctx context.Context) (username string, isDefault, mustChange bool) {
 	username = s.effectiveUsername(ctx)
-	return username, s.verifyPassword(s.cfg.Auth.Password)
+	isDefault = s.verifyPassword(s.cfg.Auth.Password)
+	return username, isDefault, isDefault && !s.cfg.Auth.AllowDefaultPassword
 }
+
+// ShortDomain 配置的短链域名原值（含 scheme，可能为空），供前端拼完整短链
+func (s *AuthService) ShortDomain() string { return s.cfg.ShortLink.Domain }
 
 // ChangeAccount 修改用户名和/或密码。需验证原密码；成功后自增凭证版本号
 // 吊销全部已签发 token（全端下线），并返回新 token 保持当前会话。
@@ -139,8 +161,8 @@ func (s *AuthService) ChangeAccount(ctx context.Context, newUsername, oldPasswor
 			return "", "", errcode.New("A0001", "用户名长度需在 2-32 个字符之间")
 		}
 	}
-	if newPassword != "" && len(newPassword) < 6 {
-		return "", "", errcode.New("A0001", "新密码至少 6 位")
+	if newPassword != "" && len(newPassword) < 8 {
+		return "", "", errcode.New("A0001", "新密码至少 8 位")
 	}
 
 	if newUsername != "" && newUsername != s.cfg.Auth.Username {
@@ -177,7 +199,7 @@ func (s *AuthService) ChangeAccount(ctx context.Context, newUsername, oldPasswor
 	return token, username, nil
 }
 
-// LoginAttempt 记录并返回该 IP 一分钟内的登录尝试次数
+// LoginAttempt 记录并返回该 IP 一分钟内的登录尝试次数（第一层频控）
 func (s *AuthService) LoginAttempt(ctx context.Context, ip string) int {
 	key := "rl:login:" + ip
 	n, _ := s.rdb.Incr(ctx, key).Result()
@@ -186,3 +208,34 @@ func (s *AuthService) LoginAttempt(ctx context.Context, ip string) int {
 	}
 	return int(n)
 }
+
+// LoginLocked 该 IP 是否处于指数退避锁定中，返回剩余锁定秒数（0 = 未锁）
+func (s *AuthService) LoginLocked(ctx context.Context, ip string) int {
+	ttl, _ := s.rdb.TTL(ctx, keyLoginLock+ip).Result()
+	if ttl <= 0 {
+		return 0
+	}
+	return int(ttl.Seconds()) + 1 // 向上取整，避免边界秒数归零
+}
+
+// RecordLoginResult 记录登录结果：成功清空失败计数；失败自增计数并按需写入退避锁
+func (s *AuthService) RecordLoginResult(ctx context.Context, ip string, ok bool) {
+	if ok {
+		s.rdb.Del(ctx, keyLoginFails+ip, keyLoginLock+ip)
+		return
+	}
+	key := keyLoginFails + ip
+	n, _ := s.rdb.Incr(ctx, key).Result()
+	if n == 1 {
+		s.rdb.Expire(ctx, key, 15*time.Minute) // 15 分钟无失败则重新计数
+	}
+	if d := loginLockDuration(int(n)); d > 0 {
+		s.rdb.Set(ctx, keyLoginLock+ip, 1, d)
+	}
+}
+
+// TokenTTL 登录态有效期（供 Cookie Max-Age 使用）
+func (s *AuthService) TokenTTL() time.Duration { return s.cfg.Auth.TokenTTL }
+
+// CookieSecureOverride 配置显式指定 Cookie Secure 时的值；nil = 自动探测
+func (s *AuthService) CookieSecureOverride() *bool { return s.cfg.Auth.CookieSecure }

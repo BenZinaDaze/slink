@@ -18,14 +18,17 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port int    `mapstructure:"port"`
-	Mode string `mapstructure:"mode"` // debug | release
+	Port          int      `mapstructure:"port"`
+	Mode          string   `mapstructure:"mode"` // debug | release
+	TrustedProxies []string `mapstructure:"trusted_proxies"` // 受信反代 CIDR；空 = 不信任任何代理头（客户端 IP 取直连地址）
 }
 
 type AuthConfig struct {
-	Username  string        `mapstructure:"username"`
-	Password  string        `mapstructure:"password"`
-	TokenTTL  time.Duration `mapstructure:"token_ttl"`
+	Username              string        `mapstructure:"username"`
+	Password              string        `mapstructure:"password"`
+	TokenTTL              time.Duration `mapstructure:"token_ttl"`
+	CookieSecure          *bool         `mapstructure:"cookie_secure"`          // nil = 自动（HTTPS 请求时启用 Secure）
+	AllowDefaultPassword  bool          `mapstructure:"allow_default_password"` // true = 不强制修改初始密码（仅横幅提醒）
 }
 
 type DatabaseConfig struct {
@@ -39,10 +42,40 @@ type RedisConfig struct {
 }
 
 type ShortLinkConfig struct {
+	// Domain 短链（公开）域名。配置后该域只提供跳转服务：
+	// /api、SPA、静态资源一律 404，管理面必须走其他域名访问；留空则单域模式（行为同旧版）
 	Domain          string        `mapstructure:"domain"`
 	DefaultCacheTTL time.Duration `mapstructure:"default_cache_ttl"`
 	NullCacheTTL    time.Duration `mapstructure:"null_cache_ttl"`
 	Whitelist       []string      `mapstructure:"whitelist"`
+}
+
+// NormalizedDomain 短链域名的 Host 形态（去 scheme/端口、小写），用于请求 Host 匹配；
+// 未配置时返回空串
+func (c *ShortLinkConfig) NormalizedDomain() string {
+	return normalizeHost(c.Domain)
+}
+
+// normalizeHost 从任意形态（https://s.example.com、s.example.com:8443、S.Example.COM/）
+// 提取小写 Host，不含端口
+func normalizeHost(raw string) string {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	if s == "" {
+		return ""
+	}
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndex(s, ":"); i >= 0 && !strings.Contains(s, "]") {
+		s = s[:i] // IPv6 裸地址不含端口场景极少，含 ] 时跳过去端口
+	}
+	if i := strings.Index(s, "]"); i >= 0 { // [::1]:8080 → ::1
+		s = s[1:i]
+	}
+	return s
 }
 
 type StatsConfig struct {

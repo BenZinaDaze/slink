@@ -111,8 +111,11 @@ func buildRouter(
 	engine := gin.New()
 	engine.Use(gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: []string{"/health"}, // 健康检查不打日志
-	}), gin.Recovery(), middleware.RequestID())
-	engine.SetTrustedProxies(nil)
+	}), gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders())
+	// 受信反代列表决定 ClientIP 是否采信 X-Forwarded-For（默认空 = 不信任，杜绝伪造头绕过限速）
+	if err := engine.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Printf("[app] trusted_proxies 配置无效: %v", err)
+	}
 
 	authH := handler.NewAuthHandler(authSvc)
 	groupH := handler.NewGroupHandler(groupSvc)
@@ -123,6 +126,7 @@ func buildRouter(
 	engine.GET("/health", func(c *gin.Context) { c.String(200, "ok") })
 
 	api := engine.Group("/api/v1")
+	api.Use(middleware.APIGate(cfg)) // 短链域下管理 API 按路由不存在处理
 	api.POST("/auth/login", authH.Login)
 	// 登录态接口
 	authed := api.Group("", middleware.Auth(authSvc))
@@ -163,7 +167,14 @@ func buildRouter(
 func spaFallback(cfg *config.Config) gin.HandlerFunc {
 	webFS := slink.WebFS()
 	fileServer := http.FileServer(http.FS(webFS))
+	shortDomain := cfg.ShortLink.NormalizedDomain()
 	return func(c *gin.Context) {
+		// 短链域不服务任何管理面：SPA 与静态资源一律按不存在的短链处理
+		if middleware.IsShortDomain(c, shortDomain) {
+			handler.ErrorPage(c, http.StatusNotFound, "短链接不存在", "该短链接不存在或已被删除")
+			c.Abort()
+			return
+		}
 		// API 未匹配 → 404 JSON
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			c.JSON(404, gin.H{"code": "B0002", "message": "接口不存在", "success": false})

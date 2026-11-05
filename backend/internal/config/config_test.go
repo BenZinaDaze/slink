@@ -61,3 +61,23 @@ func TestEnvOverride(t *testing.T) {
 		t.Fatalf("auth.password = %q, 期望保持 yaml 值 admin123", cfg.Auth.Password)
 	}
 }
+
+// TestNormalizedDomain 短链域名 Host 归一化：域分离守卫按小写 Host（去 scheme/端口）匹配
+func TestNormalizedDomain(t *testing.T) {
+	cfg := &ShortLinkConfig{}
+	cases := []struct{ raw, want string }{
+		{"", ""},
+		{"   ", ""},
+		{"s.example.com", "s.example.com"},
+		{"https://s.example.com", "s.example.com"},
+		{"http://S.Example.COM:8443/", "s.example.com"},
+		{"https://s.example.com/path?x=1", "s.example.com"},
+		{"[::1]:8080", "::1"},
+	}
+	for _, tc := range cases {
+		cfg.Domain = tc.raw
+		if got := cfg.NormalizedDomain(); got != tc.want {
+			t.Errorf("NormalizedDomain(%q) = %q, 期望 %q", tc.raw, got, tc.want)
+		}
+	}
+}

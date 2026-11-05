@@ -37,8 +37,8 @@ export default function SettingsPage() {
         newPassword: newPassword || undefined,
       }),
     onSuccess: (data) => {
-      // 接口已吊销全部旧会话并返回新 token，本地续期的同时刷新用户名
-      setAuth(data.token, data.username);
+      // 接口已吊销全部旧会话，新凭证写入 HttpOnly Cookie；本地同步用户名
+      setAuth(data.username, data.shortDomain);
       emitAuthChanged();
       toast.success("已保存，其他登录会话已全部下线");
       setOldPassword("");
@@ -55,8 +55,8 @@ export default function SettingsPage() {
       toast.warning("用户名至少 2 个字符");
       return;
     }
-    if (newPassword && newPassword.length < 6) {
-      toast.warning("新密码至少 6 位");
+    if (newPassword && newPassword.length < 8) {
+      toast.warning("新密码至少 8 位");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -81,10 +81,16 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {meQ.data?.isDefaultPassword && (
+          {meQ.data?.mustChangePassword ? (
             <p className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
-              当前仍在使用配置文件中的初始密码，建议尽快修改。
+              当前仍在使用初始密码，请在下方设置新密码后开始使用。
             </p>
+          ) : (
+            meQ.data?.isDefaultPassword && (
+              <p className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+                当前仍在使用配置文件中的初始密码，建议尽快修改。
+              </p>
+            )
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">

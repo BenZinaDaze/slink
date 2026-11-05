@@ -10,13 +10,15 @@ type LoginReq struct {
 }
 
 type LoginResp struct {
-	Token    string `json:"token"`
-	Username string `json:"username"`
+	Username    string `json:"username"`
+	ShortDomain string `json:"shortDomain"` // 配置的短链域名（含 scheme），空 = 单域模式
 }
 
 type MeResp struct {
 	Username           string `json:"username"`
-	IsDefaultPassword  bool   `json:"isDefaultPassword"` // 是否仍在使用配置初始密码
+	ShortDomain        string `json:"shortDomain"`
+	IsDefaultPassword  bool   `json:"isDefaultPassword"`  // 是否仍在使用配置初始密码
+	MustChangePassword bool   `json:"mustChangePassword"` // 强制修改（未被 allow_default_password 豁免）
 }
 
 type AccountUpdateReq struct {
@@ -74,7 +76,6 @@ type LinkUpdateReq struct {
 type LinkResp struct {
 	ID            int64      `json:"id"`
 	ShortURI      string     `json:"shortUri"`
-	FullShortURL  string     `json:"fullShortUrl"`
 	OriginURL     string     `json:"originUrl"`
 	GID           string     `json:"gid"`
 	Describe      string     `json:"describe"`

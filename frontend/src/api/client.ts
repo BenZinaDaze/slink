@@ -1,4 +1,4 @@
-import { getToken, clearAuth } from "@/lib/auth";
+import { clearAuth } from "@/lib/auth";
 
 /** 后端统一响应结构 */
 export interface R<T = unknown> {
@@ -27,10 +27,12 @@ export async function request<T>(
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> | undefined),
   };
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const resp = await fetch(path, { ...options, headers });
+  const resp = await fetch(path, {
+    ...options,
+    headers,
+    credentials: "same-origin", // 登录凭证在 HttpOnly Cookie 中，随同源请求自动携带
+  });
   const body = (await resp.json().catch(() => null)) as R<T> | null;
 
   if (!body) {

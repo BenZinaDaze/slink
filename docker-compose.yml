@@ -37,8 +37,11 @@ services:
       # 首次启动的初始账号；之后以「设置」页修改的为准
       SLINK_AUTH_USERNAME: ${SLINK_USERNAME:-admin}
       SLINK_AUTH_PASSWORD: ${SLINK_PASSWORD:-admin123}
-      # 如需固定短链域名（生产建议）：
+      # 如需固定短链域名（生产建议）：配置后该域只提供跳转服务（/api 与管理界面 404），
+      # 管理后台走其他域名反代到同一容器，详见 README「域名分离部署」
       # SLINK_SHORTLINK_DOMAIN: https://s.example.com
+      # 前置 Nginx/Caddy 反代时必须配置受信代理网段，否则限速/统计只能看到代理 IP：
+      # SLINK_SERVER_TRUSTED_PROXIES: 172.16.0.0/12
     volumes:
       - slink-data:/app/data
     depends_on:

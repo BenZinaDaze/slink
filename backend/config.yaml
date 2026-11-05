@@ -2,11 +2,15 @@
 server:
   port: 8080
   mode: debug # debug | release
+  trusted_proxies: []  # 受信反代 CIDR（如 [127.0.0.1]）；留空则不信任任何代理头，客户端 IP 取直连地址
+                       # 挂 Nginx/Caddy 时必须配置，否则限速与统计都只能看到代理 IP
 
 auth:
   username: admin       # 初始用户名；设置页修改后以 t_settings 中的值为准
   password: admin123   # 初始密码；设置页修改后以 t_settings 中的 bcrypt 哈希为准
-  token_ttl: 720h      # 登录态有效期
+  token_ttl: 720h      # 登录态有效期（Cookie Max-Age 与之同步）
+  # cookie_secure: true # Cookie Secure 属性；默认自动（HTTPS 请求启用），明网 HTTP 部署勿开
+  # allow_default_password: true # 豁免「首次登录强制修改初始密码」（默认不豁免）
 
 database:
   path: ./data/slink.db # SQLite 文件路径，目录不存在会自动创建
@@ -17,7 +21,8 @@ redis:
   db: 0
 
 shortlink:
-  domain: ""           # 短链域名，留空则使用请求 Host
+  domain: ""           # 公开短链域名（如 https://s.example.com）。配置后该域只提供跳转服务：
+                       # /api 与管理界面一律 404，管理后台需走其他域名访问；留空则单域模式
   default_cache_ttl: 720h # 永久短链的缓存 TTL（30 天）
   null_cache_ttl: 30s     # 空值缓存 TTL
   whitelist: []        # 目标域名白名单，空数组表示不限制
