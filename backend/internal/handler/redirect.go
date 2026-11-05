@@ -18,10 +18,11 @@ var shortURIRe = regexp.MustCompile(`^[0-9a-zA-Z_-]{1,16}$`)
 type RedirectHandler struct {
 	redirect *service.RedirectService
 	events   *service.EventProducer
+	reserved map[string]struct{} // 保留字随 admin.path 变化，由装配层注入
 }
 
-func NewRedirectHandler(redirect *service.RedirectService, events *service.EventProducer) *RedirectHandler {
-	return &RedirectHandler{redirect: redirect, events: events}
+func NewRedirectHandler(redirect *service.RedirectService, events *service.EventProducer, reserved map[string]struct{}) *RedirectHandler {
+	return &RedirectHandler{redirect: redirect, events: events, reserved: reserved}
 }
 
 // Handle NoRoute 第一环：疑似短码则跳转，否则交由 SPA 兜底（c.Next）
@@ -32,8 +33,8 @@ func (h *RedirectHandler) Handle(c *gin.Context) {
 		c.Next()
 		return
 	}
-	// 前端路由保留字 → SPA 处理
-	if _, reserved := service.ReservedPaths[code]; reserved {
+	// 保留字（真实路由/管理入口）→ SPA 处理
+	if _, reserved := h.reserved[code]; reserved {
 		c.Next()
 		return
 	}

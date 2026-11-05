@@ -81,3 +81,35 @@ func TestNormalizedDomain(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminPathValidate 管理入口路径校验：合法放行，非法/保留路径拒绝；前缀形态带 /
+func TestAdminPathValidate(t *testing.T) {
+	adm := &AdminConfig{}
+	for _, ok := range []string{"my-panel", "PanEl_9", "ab"} {
+		adm.Path = ok
+		if err := adm.validate(); err != nil {
+			t.Errorf("validate(%q) 不应报错: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "a", "admin123admin12345678901234567890", "含中文", "pa th", "api", "health"} {
+		adm.Path = bad
+		if err := adm.validate(); err == nil && bad != "" {
+			t.Errorf("validate(%q) 应报错", bad)
+		}
+	}
+	adm.Path = "my-panel"
+	if got := adm.AdminPrefix(); got != "/my-panel" {
+		t.Errorf("AdminPrefix() = %q, 期望 /my-panel", got)
+	}
+	adm.Path = ""
+	if got := adm.AdminPrefix(); got != "" {
+		t.Errorf("未配置时 AdminPrefix() 应为空, 实际 %q", got)
+	}
+	if adm.IsWeak() {
+		t.Error("空路径不应判为弱路径")
+	}
+	adm.Path = "admin"
+	if !adm.IsWeak() {
+		t.Error("admin 应判为弱路径")
+	}
+}

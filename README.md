@@ -50,7 +50,7 @@ docker run -d --name slink --network slink -p 8080:8080 \
 1. 进入「设置」页**修改初始密码**——使用初始密码期间会强制停留在设置页，改完才能使用其他功能
 2. 创建第一条短链接：短链接页 → 新建短链接，粘贴长链接即可；标题可自动抓取
 3. 点短码旁的二维码图标可展示/复制二维码
-4. 生产环境建议配置[域名分离](#域名分离部署)：短链公开域与管理后台分开
+4. 生产环境建议[隐藏管理后台入口](#隐藏管理后台入口)：单域隐藏入口或双域名分离，按需选择
 
 ## 配置
 
@@ -62,7 +62,8 @@ docker run -d --name slink --network slink -p 8080:8080 \
 | 初始账号 | `SLINK_USERNAME` | `admin` | 仅首次启动生效，之后以「设置」页修改的为准 |
 | 初始密码 | `SLINK_PASSWORD` | `admin123` | 同上 |
 | 服务端口 | compose 里 `8080:8080` 左侧 | 8080 | 对外访问端口 |
-| 短链域名 | `SLINK_SHORTLINK_DOMAIN` | 请求 Host | 公开短链域名，如 `https://s.example.com`。**配置后该域只提供跳转服务**（`/api` 与管理界面一律 404），管理后台需走其他域名访问，见「域名分离部署」 |
+| 管理入口路径 | `SLINK_ADMIN_PATH` | 挂根路径 | 管理后台隐藏入口，如 `my-secret-panel`。**配置后根路径与 `/login` 一律 404**，管理界面只在该前缀下提供，见「隐藏管理后台入口」 |
+| 短链域名 | `SLINK_SHORTLINK_DOMAIN` | 请求 Host | 公开短链域名，如 `https://s.example.com`。**配置后该域只提供跳转服务**（`/api` 与管理界面一律 404），管理后台需走其他域名访问，见「隐藏管理后台入口」 |
 | 受信代理网段 | config `server.trusted_proxies` | 不信任 | 前置 Nginx/Caddy 时必填（如 `172.16.0.0/12`），否则客户端 IP 只能看到代理地址，限速与地域统计失真；留空时伪造 `X-Forwarded-For` 也无法绕过登录限速 |
 | 目标域名白名单 | config `shortlink.whitelist` | 不限制 | 限制只能给指定域名生成短链（如防滥用） |
 
@@ -89,11 +90,32 @@ docker run -d --name slink --network slink -p 8080:8080 \
 **如何启用 HTTPS？**
 在前面挂一层反向代理（Nginx / Caddy / Traefik）终结 TLS，并把 `SLINK_SHORTLINK_DOMAIN` 设为 `https://你的域名`。跳转统计依赖每次点击回源，务必使用 HTTPS。反代记得同时设置受信代理网段（见配置表）。HSTS 也建议在这一层加：`Strict-Transport-Security: max-age=31536000`。
 
-**域名分离部署**
+**隐藏管理后台入口**
 
-短链域名是公开的，任何人都访问得到；管理后台（登录、短链管理）不该暴露在同一个域上。给 slink 配置 `SLINK_SHORTLINK_DOMAIN` 后，**该域只提供跳转服务**——`/api`、登录页、静态资源一律返回 404，扫描器探测不到任何管理面，即使服务裸暴露也一样。管理后台走另一个域名反代到同一容器即可。
+短链域名是公开的，任何人访问得到；登录页不该摆在明面上。两种做法按需选择：
 
-Caddy 示例（`s.example.com` 公开跳转，`admin.example.com` 管理，按需给管理域加 IP 白名单或 VPN）：
+**做法一：单域隐藏入口（简单，推荐自用）**
+
+配置 `SLINK_ADMIN_PATH` 给管理后台一个只有你知道的入口路径：
+
+```bash
+SLINK_ADMIN_PATH=my-secret-panel   # 2-32 位字母/数字/-/_，建议随机难猜
+```
+
+效果（以 `s.example.com` 为例）：
+
+| 访问 | 结果 |
+|---|---|
+| `s.example.com/` | 404 |
+| `s.example.com/login` | 404 |
+| `s.example.com/my-secret-panel` | 管理后台（未登录时是登录页） |
+| `s.example.com/任意短码` | 正常跳转 |
+
+根路径看不出这是管理后台，`login`、`links` 等词在隐藏模式下还可以直接当短码用。入口路径忘了看 compose/配置文件即可。
+
+**做法二：双域名分离（更严格）**
+
+配置 `SLINK_SHORTLINK_DOMAIN` 后，**该域只提供跳转服务**——`/api`、管理界面（含隐藏入口）一律 404，扫描器探测不到任何管理面，即使服务裸暴露也一样。管理后台走另一个域名反代到同一容器，按需给管理域加 IP 白名单或 VPN：
 
 ```caddyfile
 s.example.com {

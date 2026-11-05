@@ -1,4 +1,4 @@
-import { clearAuth } from "@/lib/auth";
+import { adminBase, clearAuth } from "@/lib/auth";
 
 /** 后端统一响应结构 */
 export interface R<T = unknown> {
@@ -41,7 +41,7 @@ export async function request<T>(
   if (!body.success) {
     if (UNAUTHORIZED_CODES.has(body.code)) {
       clearAuth();
-      window.location.href = "/login";
+      window.location.href = `${adminBase()}/login`;
     }
     throw new ApiError(body.code, body.message);
   }

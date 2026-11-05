@@ -34,6 +34,7 @@
 - 防爆破三层：每 IP 每分钟 10 次尝试上限 → 连续失败 ≥5 次指数退避锁（30s 起步翻倍，封顶 1h，`service.loginLockDuration`）→ 凭证校验
 - 客户端 IP 一律取 gin `c.ClientIP()`，由 `engine.SetTrustedProxies(cfg.Server.TrustedProxies)` 控制是否采信 `X-Forwarded-For`——**默认空 = 不信任**，伪造代理头无法绕过限速；统计管道的 IP 同源
 - **域分离**（`shortlink.domain` 非空时）：该 Host 下 `/api/*`（`middleware.APIGate`）与 SPA/静态资源（`app.spaFallback` 顶部守卫）一律 404，与不存在路由不可区分，只保留 `/health` 与短码跳转
+- **管理入口隐藏**（`admin.path` 非空时）：SPA 与静态资源只在 `/{admin.path}/` 前缀下提供，根路径与 `/login` 404。实现要点：`app.prepareAdminIndex` 启动时预改写 index.html（资产绝对路径加前缀 + 注入 `<meta name="slink-admin-base">`，meta 不受 CSP `script-src 'self'` 限制）；CSS 内 `url(/assets/...)` 字体引用按文件缓存改写（`applyAdminBase`）；前端 `BrowserRouter basename` 读 meta 生效，路由整体搬到前缀下；保留字随模式动态变化（`service.ReservedPathsFor`）——隐藏模式下 `login`/`links` 等可作短码，`api`/`health`/`admin.path` 本身保留
 - 全局安全响应头（`middleware.SecurityHeaders`）：CSP（script 限自持、style 需 unsafe-inline）、`X-Frame-Options: DENY`、nosniff、Referrer-Policy；HSTS 留给 TLS 终结的反代层
 
 ## API 概览

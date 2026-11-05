@@ -11,10 +11,57 @@ import (
 type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	Auth      AuthConfig      `mapstructure:"auth"`
+	Admin     AdminConfig     `mapstructure:"admin"`
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Redis     RedisConfig     `mapstructure:"redis"`
 	ShortLink ShortLinkConfig `mapstructure:"shortlink"`
 	Stats     StatsConfig     `mapstructure:"stats"`
+}
+
+type AdminConfig struct {
+	// Path 管理后台入口路径（如 "my-panel" → https://域名/my-panel）。
+	// 配置后整个管理界面只在该前缀下提供，根路径与 /login 一律 404；留空则管理面在根路径（旧行为）
+	Path string `mapstructure:"path"`
+}
+
+// commonAdminPaths 常见易猜路径：仅启动时打日志提醒，不强制
+var commonAdminPaths = map[string]struct{}{
+	"admin": {}, "login": {}, "manage": {}, "manager": {},
+	"panel": {}, "console": {}, "backend": {}, "slink": {}, "dashboard": {},
+}
+
+// IsWeak 是否为常见易猜的管理入口路径（仅供启动日志提示）
+func (c *AdminConfig) IsWeak() bool {
+	_, ok := commonAdminPaths[strings.ToLower(c.Path)]
+	return ok
+}
+
+// AdminPrefix 管理入口的 URL 前缀形态（"/my-panel"），未配置返回空串。
+// 请求路径匹配与前端 basename 都以此为准；路径区分大小写
+func (c *AdminConfig) AdminPrefix() string {
+	if c.Path == "" {
+		return ""
+	}
+	return "/" + c.Path
+}
+
+func (c *AdminConfig) validate() error {
+	p := c.Path
+	if p == "" {
+		return nil
+	}
+	if len(p) < 2 || len(p) > 32 {
+		return fmt.Errorf("admin.path 长度需在 2-32 个字符之间")
+	}
+	for _, r := range p {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return fmt.Errorf("admin.path 仅允许字母、数字、-、_")
+		}
+	}
+	if p == "api" || p == "health" {
+		return fmt.Errorf("admin.path 不能为保留路径 %q", p)
+	}
+	return nil
 }
 
 type ServerConfig struct {
@@ -103,6 +150,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
 	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	if err := cfg.Admin.validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

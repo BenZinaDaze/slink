@@ -2,6 +2,14 @@ const USERNAME_KEY = "slink_username";
 const SHORT_DOMAIN_KEY = "slink_short_domain";
 const LEGACY_TOKEN_KEY = "slink_token";
 
+/**
+ * 管理后台的路由前缀（隐藏入口模式由后端注入 <meta name="slink-admin-base">）。
+ * 根路径模式下为空串，路由挂 /
+ */
+export function adminBase(): string {
+	return document.querySelector('meta[name="slink-admin-base"]')?.getAttribute("content") ?? "";
+}
+
 // 旧版本把登录 token 存 localStorage（XSS 可窃取），已迁移为 HttpOnly Cookie；
 // 启动时清理遗留值，存量会话需重新登录一次
 localStorage.removeItem(LEGACY_TOKEN_KEY);

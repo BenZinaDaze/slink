@@ -5,10 +5,12 @@ import (
 	"context"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -86,6 +88,12 @@ func New(cfg *config.Config) (*App, error) {
 	consumer := stats.NewConsumer(cfg, rdb, statsRepo, linkRepo, locale)
 
 	// 路由
+	if p := cfg.Admin.Path; p != "" {
+		if cfg.Admin.IsWeak() {
+			log.Printf("[app] 提示: admin.path=%q 较常见易被猜到，建议改用更随机的入口路径", p)
+		}
+		log.Printf("[app] 管理面入口已隐藏至 /%s（根路径与 /login 不再提供管理界面）", p)
+	}
 	engine := buildRouter(cfg, authSvc, groupSvc, linkSvc, redirectSvc, events, statsSvc, dashSvc)
 
 	return &App{
@@ -120,7 +128,7 @@ func buildRouter(
 	authH := handler.NewAuthHandler(authSvc)
 	groupH := handler.NewGroupHandler(groupSvc)
 	linkH := handler.NewLinkHandler(linkSvc)
-	redirectH := handler.NewRedirectHandler(redirectSvc, events)
+	redirectH := handler.NewRedirectHandler(redirectSvc, events, service.ReservedPathsFor(cfg.Admin.Path))
 	statsH := handler.NewStatsHandler(statsSvc, dashSvc)
 
 	engine.GET("/health", func(c *gin.Context) { c.String(200, "ok") })
@@ -162,12 +170,19 @@ func buildRouter(
 	return engine
 }
 
-// spaFallback SPA 静态资源服务：内嵌 web/dist（go:embed），
-// 精确命中文件则直出，否则回退 index.html（前端路由接管）
+// spaFallback SPA 静态资源服务：内嵌 web/dist（go:embed）。
+// 两种模式：
+//   - 根路径模式（admin.path 未配置）：任意未匹配路径 → 文件或 index.html（旧行为）
+//   - 隐藏入口模式（配置 admin.path）：SPA 与静态资源只在 /{admin.path}/ 前缀下提供，
+//     且 index.html / CSS / JS 中的资产路径改写为前缀相对；其余路径按不存在的短链 404
 func spaFallback(cfg *config.Config) gin.HandlerFunc {
 	webFS := slink.WebFS()
 	fileServer := http.FileServer(http.FS(webFS))
 	shortDomain := cfg.ShortLink.NormalizedDomain()
+	adminPrefix := cfg.Admin.AdminPrefix()
+	adminIndex := prepareAdminIndex(webFS, adminPrefix)
+	serveAdminAsset := newAdminAssetServer(webFS, adminPrefix)
+
 	return func(c *gin.Context) {
 		// 短链域不服务任何管理面：SPA 与静态资源一律按不存在的短链处理
 		if middleware.IsShortDomain(c, shortDomain) {
@@ -180,6 +195,10 @@ func spaFallback(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(404, gin.H{"code": "B0002", "message": "接口不存在", "success": false})
 			return
 		}
+		if adminPrefix != "" {
+			serveAdminSPA(c, webFS, adminPrefix, adminIndex, serveAdminAsset)
+			return
+		}
 		p := strings.TrimPrefix(c.Request.URL.Path, "/")
 		if p != "" {
 			if st, err := fs.Stat(webFS, p); err == nil && !st.IsDir() {
@@ -188,7 +207,7 @@ func spaFallback(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 		// 前端产物未嵌入（仓库里 web/dist 只有 .gitkeep）时给出构建提示
-		if _, err := fs.Stat(webFS, "index.html"); err != nil {
+		if adminIndex == nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"code": "B0003",
 				"message": "前端资源未构建：请在项目根目录执行 make build 生成单二进制，或使用 make dev 进入开发模式",
@@ -199,6 +218,90 @@ func spaFallback(cfg *config.Config) gin.HandlerFunc {
 		c.Header("Cache-Control", "no-cache")
 		http.ServeFileFS(c.Writer, c.Request, webFS, "index.html")
 	}
+}
+
+// prepareAdminIndex 隐藏入口模式下的 index.html 预改写：
+// 资产绝对路径加前缀 + 注入 basename meta（meta 不受 CSP script-src 限制，前端据此设置路由 basename）
+func prepareAdminIndex(webFS fs.FS, adminPrefix string) []byte {
+	if adminPrefix == "" {
+		return nil
+	}
+	raw, err := fs.ReadFile(webFS, "index.html")
+	if err != nil {
+		return nil
+	}
+	html := string(applyAdminBase(raw, adminPrefix))
+	meta := `<head><meta name="slink-admin-base" content="` + adminPrefix + `">`
+	html = strings.Replace(html, "<head>", meta, 1)
+	return []byte(html)
+}
+
+// newAdminAssetServer 隐藏入口模式下的静态资源服务：文件内容按需缓存改写
+// （CSS 内的字体等 url(/assets/...) 与 JS 里可能的资产字符串都指向前缀路径）
+func newAdminAssetServer(webFS fs.FS, adminPrefix string) func(*gin.Context, string) {
+	var mu sync.Mutex
+	cache := map[string][]byte{}
+	return func(c *gin.Context, name string) {
+		data, err := fs.ReadFile(webFS, name)
+		if err != nil {
+			handler.ErrorPage(c, http.StatusNotFound, "短链接不存在", "该短链接不存在或已被删除")
+			return
+		}
+		ext := filepath.Ext(name)
+		if ext == ".css" || ext == ".js" {
+			mu.Lock()
+			out, ok := cache[name]
+			if !ok {
+				out = applyAdminBase(data, adminPrefix)
+				cache[name] = out
+			}
+			mu.Unlock()
+			data = out
+		}
+		ct := mime.TypeByExtension(ext)
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		// vite 产物文件名带内容哈希，可长缓存
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.Data(http.StatusOK, ct, data)
+	}
+}
+
+// applyAdminBase 把构建产物中的根相对资产路径改写为管理前缀下的绝对路径
+func applyAdminBase(content []byte, prefix string) []byte {
+	s := string(content)
+	s = strings.ReplaceAll(s, `"/assets/`, `"`+prefix+`/assets/`)
+	s = strings.ReplaceAll(s, `"/favicon.svg`, `"`+prefix+`/favicon.svg`)
+	s = strings.ReplaceAll(s, `url(/assets/`, `url(`+prefix+`/assets/`)
+	return []byte(s)
+}
+
+// serveAdminSPA 隐藏入口模式：前缀外一律 404；前缀内文件命中直出，否则回退 index.html
+func serveAdminSPA(c *gin.Context, webFS fs.FS, prefix string, indexHTML []byte, serveAsset func(*gin.Context, string)) {
+	path := c.Request.URL.Path
+	if path != prefix && !strings.HasPrefix(path, prefix+"/") {
+		handler.ErrorPage(c, http.StatusNotFound, "短链接不存在", "该短链接不存在或已被删除")
+		c.Abort()
+		return
+	}
+	p := strings.TrimPrefix(strings.TrimPrefix(path, prefix), "/")
+	if p != "" {
+		if st, err := fs.Stat(webFS, p); err == nil && !st.IsDir() {
+			serveAsset(c, p)
+			return
+		}
+	}
+	if indexHTML == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code": "B0003",
+			"message": "前端资源未构建：请在项目根目录执行 make build 生成单二进制，或使用 make dev 进入开发模式",
+			"success": false,
+		})
+		return
+	}
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 }
 
 // Run 启动 HTTP 服务与统计消费者，阻塞直至 ctx 取消

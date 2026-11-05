@@ -12,6 +12,11 @@ auth:
   # cookie_secure: true # Cookie Secure 属性；默认自动（HTTPS 请求启用），明网 HTTP 部署勿开
   # allow_default_password: true # 豁免「首次登录强制修改初始密码」（默认不豁免）
 
+admin:
+  path: ""             # 管理后台隐藏入口（如 my-panel → https://域名/my-panel）。
+                       # 配置后根路径与 /login 一律 404，管理界面只在该前缀下提供；留空则挂根路径（旧行为）
+
+
 database:
   path: ./data/slink.db # SQLite 文件路径，目录不存在会自动创建
 

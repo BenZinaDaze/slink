@@ -28,16 +28,24 @@ import (
 // 仅字母/数字/-/_（不含 "."，避免与静态资源路径冲突）
 var customURIRe = regexp.MustCompile(`^[0-9a-zA-Z_-]{2,16}$`)
 
-// ReservedPaths 前端路由保留字：与 SPA 路由冲突的短码不允许创建，
-// NoRoute 解析时也优先按 SPA 处理
-var ReservedPaths = map[string]struct{}{
+// rootModeReserved 旧版单域根路径模式的保留字：SPA 挂在根路径，与前端路由冲突的
+// 短码不允许创建，NoRoute 解析时也优先按 SPA 处理
+var rootModeReserved = map[string]struct{}{
 	"login": {}, "links": {}, "recycle-bin": {}, "settings": {},
 	"assets": {}, "api": {}, "dashboard": {}, "link-error": {},
 }
 
-func isReserved(uri string) bool {
-	_, ok := ReservedPaths[uri]
-	return ok
+// ReservedPathsFor 计算当前模式下的保留短码集合：
+// - 根路径模式（adminPath 为空）→ 全量前端路由保留字
+// - 隐藏入口模式（配置 admin.path）→ 管理面整体挪到该前缀下，根路径只剩真实路由
+//   （api/health）与管理入口本身；login/links 等都可以作为短码使用
+func ReservedPathsFor(adminPath string) map[string]struct{} {
+	if adminPath == "" {
+		return rootModeReserved
+	}
+	return map[string]struct{}{
+		adminPath: {}, "api": {}, "health": {},
+	}
 }
 
 type LinkService struct {
@@ -51,6 +59,12 @@ type LinkService struct {
 
 func NewLinkService(cfg *config.Config, link *repo.LinkRepo, group *repo.GroupRepo, gen *shortgen.Generator, bf *bloom.Filter, cache *LinkCache) *LinkService {
 	return &LinkService{cfg: cfg, link: link, group: group, gen: gen, bloom: bf, cache: cache}
+}
+
+// isReserved 当前模式下该短码是否与真实路由冲突（保留字随 admin.path 动态变化）
+func (s *LinkService) isReserved(uri string) bool {
+	_, ok := ReservedPathsFor(s.cfg.Admin.Path)[uri]
+	return ok
 }
 
 // validateURL 校验原始链接：协议/长度/白名单/防 SSRF（内网地址）
@@ -97,7 +111,7 @@ func (s *LinkService) Create(ctx context.Context, req dto.LinkCreateReq) (*dto.L
 		if !customURIRe.MatchString(shortURI) {
 			return nil, errcode.ShortURIInvalid
 		}
-		if isReserved(shortURI) {
+		if s.isReserved(shortURI) {
 			return nil, errcode.ShortURIInvalid
 		}
 		if exists, err := s.shortURIExists(ctx, shortURI); err != nil {
@@ -109,7 +123,7 @@ func (s *LinkService) Create(ctx context.Context, req dto.LinkCreateReq) (*dto.L
 		// 雪花短码理论上无冲突，布隆/唯一约束兜底重试
 		for i := 0; i < 3; i++ {
 			candidate := s.gen.NewCode()
-			if isReserved(candidate) {
+			if s.isReserved(candidate) {
 				continue
 			}
 			exists, err := s.shortURIExists(ctx, candidate)

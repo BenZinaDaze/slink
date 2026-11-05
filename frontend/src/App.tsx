@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 import { AppLayout } from "@/components/app-layout";
 import { initTheme } from "@/components/theme-toggle";
-import { isLoggedIn } from "@/lib/auth";
+import { adminBase, isLoggedIn } from "@/lib/auth";
 import { getMe } from "@/api";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -49,7 +49,8 @@ function AuthedLayout() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      {/* 隐藏入口模式下后端注入 slink-admin-base meta，路由整体挂到该前缀下 */}
+      <BrowserRouter basename={adminBase() || undefined}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<AuthedLayout />}>
